@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -48,32 +49,17 @@ func (c *ContactsListCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 	if outfmt.IsJSON(ctx) {
-		type item struct {
-			Resource         string   `json:"resource"`
-			Name             string   `json:"name,omitempty"`
-			Email            string   `json:"email,omitempty"`
-			Phone            string   `json:"phone,omitempty"`
-			MembershipGroups []string `json:"membershipGroups,omitempty"`
-		}
-		items := make([]item, 0, len(resp.Connections))
-		groupNames := map[string]string{}
-		if c.IncludeMemberships {
-			groupNames, err = listContactGroupNames(ctx, svc, account)
-			if err != nil {
-				return err
-			}
+		items := make([]contactSummaryItem, 0, len(resp.Connections))
+		var groupNames map[string]string
+		groupNames, err = loadContactGroupNames(svc, c.IncludeMemberships)
+		if err != nil {
+			return err
 		}
 		for _, p := range resp.Connections {
 			if p == nil {
 				continue
 			}
-			items = append(items, item{
-				Resource:         p.ResourceName,
-				Name:             primaryName(p),
-				Email:            primaryEmail(p),
-				Phone:            primaryPhone(p),
-				MembershipGroups: membershipGroupNames(p, groupNames),
-			})
+			items = append(items, contactSummaryForPerson(p, groupNames))
 		}
 		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
 			"contacts":      items,
@@ -87,17 +73,17 @@ func (c *ContactsListCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	w, flush := tableWriter(ctx)
 	defer flush()
-	fmt.Fprintln(w, "RESOURCE\tNAME\tEMAIL\tPHONE")
+	var groupNames map[string]string
+	groupNames, err = loadContactGroupNames(svc, c.IncludeMemberships)
+	if err != nil {
+		return err
+	}
+	writeContactSummaryHeader(w, c.IncludeMemberships)
 	for _, p := range resp.Connections {
 		if p == nil {
 			continue
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-			p.ResourceName,
-			sanitizeTab(primaryName(p)),
-			sanitizeTab(primaryEmail(p)),
-			sanitizeTab(primaryPhone(p)),
-		)
+		writeContactSummaryRow(w, contactSummaryForPerson(p, groupNames), c.IncludeMemberships)
 	}
 
 	printNextPageHint(u, resp.NextPageToken)
@@ -131,24 +117,29 @@ func (c *ContactsGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 			return err
 		}
 	} else {
-		resp, err := svc.People.SearchContacts().
-			Query(identifier).
-			PageSize(10).
-			ReadMask(contactsGetReadMask).
-			Do()
-		if err != nil {
-			return err
-		}
-		for _, r := range resp.Results {
-			if r.Person == nil {
-				continue
+		if looksLikeEmail(identifier) {
+			p, err = findGoogleContactByEmail(ctx, svc, identifier)
+			if err != nil {
+				if !errors.Is(err, errGoogleContactNotFound) {
+					return err
+				}
+				p = nil
 			}
-			if strings.EqualFold(primaryEmail(r.Person), identifier) {
+		} else {
+			resp, searchErr := svc.People.SearchContacts().
+				Query(identifier).
+				PageSize(10).
+				ReadMask(contactsGetReadMask).
+				Do()
+			if searchErr != nil {
+				return searchErr
+			}
+			for _, r := range resp.Results {
+				if r.Person == nil {
+					continue
+				}
 				p = r.Person
 				break
-			}
-			if p == nil {
-				p = r.Person
 			}
 		}
 		if p == nil {
@@ -161,14 +152,21 @@ func (c *ContactsGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 	}
 
 	if outfmt.IsJSON(ctx) {
-		groupNames, err := listContactGroupNames(ctx, svc, account)
+		var groupNames map[string]string
+		groupNames, err = loadContactGroupNames(svc, true)
 		if err != nil {
 			return err
 		}
 		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
-			"contact": p,
+			"contact":          p,
 			"membershipGroups": membershipGroupNames(p, groupNames),
 		})
+	}
+
+	var groupNames map[string]string
+	groupNames, err = loadContactGroupNames(svc, true)
+	if err != nil {
+		return err
 	}
 
 	u.Out().Printf("resource\t%s", p.ResourceName)
@@ -220,6 +218,9 @@ func (c *ContactsGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 		for _, k := range keys {
 			u.Out().Printf("custom:%s\t%s", k, customFields[k])
 		}
+	}
+	if membershipGroups := membershipGroupNames(p, groupNames); len(membershipGroups) > 0 {
+		u.Out().Printf("membership_groups\t%s", strings.Join(membershipGroups, ", "))
 	}
 	return nil
 }

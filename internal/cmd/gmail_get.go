@@ -68,6 +68,8 @@ func (c *GmailGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 	}
 
 	unsubscribe := bestUnsubscribeLink(msg.Payload)
+	contactResolver := newGmailContactResolver(ctx, account)
+	headerContacts := contactResolver.LookupMessageHeaders(ctx, msg.Payload)
 	if outfmt.IsJSON(ctx) {
 		// Include a flattened headers map for easier querying
 		// (e.g., jq '.headers.to' instead of complex nested queries)
@@ -80,8 +82,9 @@ func (c *GmailGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 			"date":    headerValue(msg.Payload, "Date"),
 		}
 		payload := map[string]any{
-			"message": msg,
-			"headers": headers,
+			"message":        msg,
+			"headers":        headers,
+			"headerContacts": headerContacts,
 		}
 		if unsubscribe != "" {
 			payload["unsubscribe"] = unsubscribe
@@ -97,8 +100,10 @@ func (c *GmailGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 				payload["attachments"] = attachmentOutputs(attachments)
 			}
 		}
+		addContactEnrichmentStatus(payload, contactResolver)
 		return outfmt.WriteJSON(ctx, os.Stdout, payload)
 	}
+	warnContactEnrichment(u, contactResolver)
 
 	u.Out().Printf("id\t%s", msg.Id)
 	u.Out().Printf("thread_id\t%s", msg.ThreadId)
@@ -118,10 +123,12 @@ func (c *GmailGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 		u.Out().Println(string(decoded))
 		return nil
 	case gmailFormatMetadata, gmailFormatFull:
-		u.Out().Printf("from\t%s", headerValue(msg.Payload, "From"))
-		u.Out().Printf("to\t%s", headerValue(msg.Payload, "To"))
-		u.Out().Printf("cc\t%s", headerValue(msg.Payload, "Cc"))
-		u.Out().Printf("bcc\t%s", headerValue(msg.Payload, "Bcc"))
+		for _, field := range buildHeaderContactFields(msg.Payload, headerContacts) {
+			u.Out().Printf("%s\t%s", field.Key, field.Value)
+			if field.Summary != "" {
+				u.Out().Printf("%s_contact\t%s", field.Key, field.Summary)
+			}
+		}
 		u.Out().Printf("subject\t%s", headerValue(msg.Payload, "Subject"))
 		u.Out().Printf("date\t%s", headerValue(msg.Payload, "Date"))
 		if unsubscribe != "" {

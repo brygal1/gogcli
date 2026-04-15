@@ -95,16 +95,19 @@ func (c *GmailSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 
-	items, err := fetchThreadDetails(ctx, svc, threads, idToName, c.Oldest, loc)
+	contactResolver := newGmailContactResolver(ctx, account)
+	items, err := fetchThreadDetails(ctx, svc, threads, idToName, c.Oldest, loc, contactResolver)
 	if err != nil {
 		return err
 	}
 
 	if outfmt.IsJSON(ctx) {
-		if writeErr := outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
+		payload := map[string]any{
 			"threads":       items,
 			"nextPageToken": nextPageToken,
-		}); writeErr != nil {
+		}
+		addContactEnrichmentStatus(payload, contactResolver)
+		if writeErr := outfmt.WriteJSON(ctx, os.Stdout, payload); writeErr != nil {
 			return writeErr
 		}
 		if len(items) == 0 {
@@ -117,17 +120,19 @@ func (c *GmailSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
 		u.Err().Println("No results")
 		return failEmptyExit(c.FailEmpty)
 	}
+	warnContactEnrichment(u, contactResolver)
 
 	w, flush := tableWriter(ctx)
 	defer flush()
 
-	fmt.Fprintln(w, "ID\tDATE\tFROM\tSUBJECT\tLABELS\tTHREAD")
+	fmt.Fprintln(w, "ID\tDATE\tFROM\tSUBJECT\tLABELS\tIN_CONTACTS\tGROUPS\tTHREAD")
 	for _, it := range items {
 		threadInfo := "-"
 		if it.MessageCount > 1 {
 			threadInfo = fmt.Sprintf("[%d msgs]", it.MessageCount)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", it.ID, it.Date, it.From, it.Subject, strings.Join(it.Labels, ","), threadInfo)
+		inContacts, groups := summarizeSingleResolvedHeaderContactForTable(it.FromContact)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", it.ID, it.Date, it.From, it.Subject, strings.Join(it.Labels, ","), inContacts, groups, threadInfo)
 	}
 	printNextPageHint(u, nextPageToken)
 	return nil

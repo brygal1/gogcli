@@ -107,16 +107,19 @@ func (c *GmailMessagesSearchCmd) Run(ctx context.Context, flags *RootFlags) erro
 		return err
 	}
 
-	items, err := fetchMessageDetails(ctx, svc, messages, idToName, loc, c.IncludeBody)
+	contactResolver := newGmailContactResolver(ctx, account)
+	items, err := fetchMessageDetails(ctx, svc, messages, idToName, loc, c.IncludeBody, contactResolver)
 	if err != nil {
 		return err
 	}
 
 	if outfmt.IsJSON(ctx) {
-		if writeErr := outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
+		payload := map[string]any{
 			"messages":      items,
 			"nextPageToken": nextPageToken,
-		}); writeErr != nil {
+		}
+		addContactEnrichmentStatus(payload, contactResolver)
+		if writeErr := outfmt.WriteJSON(ctx, os.Stdout, payload); writeErr != nil {
 			return writeErr
 		}
 		if len(items) == 0 {
@@ -129,24 +132,26 @@ func (c *GmailMessagesSearchCmd) Run(ctx context.Context, flags *RootFlags) erro
 		u.Err().Println("No results")
 		return failEmptyExit(c.FailEmpty)
 	}
+	warnContactEnrichment(u, contactResolver)
 
 	w, flush := tableWriter(ctx)
 	defer flush()
 
 	if c.IncludeBody {
-		fmt.Fprintln(w, "ID\tTHREAD\tDATE\tFROM\tSUBJECT\tLABELS\tBODY")
+		fmt.Fprintln(w, "ID\tTHREAD\tDATE\tFROM\tSUBJECT\tLABELS\tIN_CONTACTS\tGROUPS\tBODY")
 	} else {
-		fmt.Fprintln(w, "ID\tTHREAD\tDATE\tFROM\tSUBJECT\tLABELS")
+		fmt.Fprintln(w, "ID\tTHREAD\tDATE\tFROM\tSUBJECT\tLABELS\tIN_CONTACTS\tGROUPS")
 	}
 	for _, it := range items {
 		body := ""
 		if c.IncludeBody {
 			body = sanitizeMessageBody(it.Body, c.Full)
 		}
+		inContacts, groups := summarizeSingleResolvedHeaderContactForTable(it.FromContact)
 		if c.IncludeBody {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", it.ID, it.ThreadID, it.Date, it.From, it.Subject, strings.Join(it.Labels, ","), body)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", it.ID, it.ThreadID, it.Date, it.From, it.Subject, strings.Join(it.Labels, ","), inContacts, groups, body)
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", it.ID, it.ThreadID, it.Date, it.From, it.Subject, strings.Join(it.Labels, ","))
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", it.ID, it.ThreadID, it.Date, it.From, it.Subject, strings.Join(it.Labels, ","), inContacts, groups)
 		}
 	}
 	printNextPageHint(u, nextPageToken)
@@ -216,16 +221,17 @@ func (c *GmailMessagesModifyCmd) Run(ctx context.Context, flags *RootFlags) erro
 }
 
 type messageItem struct {
-	ID       string   `json:"id"`
-	ThreadID string   `json:"threadId,omitempty"`
-	Date     string   `json:"date,omitempty"`
-	From     string   `json:"from,omitempty"`
-	Subject  string   `json:"subject,omitempty"`
-	Labels   []string `json:"labels,omitempty"`
-	Body     string   `json:"body,omitempty"`
+	ID          string                 `json:"id"`
+	ThreadID    string                 `json:"threadId,omitempty"`
+	Date        string                 `json:"date,omitempty"`
+	From        string                 `json:"from,omitempty"`
+	FromContact *resolvedHeaderContact `json:"fromContact,omitempty"`
+	Subject     string                 `json:"subject,omitempty"`
+	Labels      []string               `json:"labels,omitempty"`
+	Body        string                 `json:"body,omitempty"`
 }
 
-func fetchMessageDetails(ctx context.Context, svc *gmail.Service, messages []*gmail.Message, idToName map[string]string, loc *time.Location, includeBody bool) ([]messageItem, error) {
+func fetchMessageDetails(ctx context.Context, svc *gmail.Service, messages []*gmail.Message, idToName map[string]string, loc *time.Location, includeBody bool, resolver *gmailContactResolver) ([]messageItem, error) {
 	if len(messages) == 0 {
 		return nil, nil
 	}
@@ -279,6 +285,11 @@ func fetchMessageDetails(ctx context.Context, svc *gmail.Service, messages []*gm
 			}
 
 			item.From = sanitizeTab(headerValue(msg.Payload, "From"))
+			if resolver != nil {
+				if contacts := resolver.LookupHeader(ctx, headerValue(msg.Payload, "From")); len(contacts) > 0 {
+					item.FromContact = &contacts[0]
+				}
+			}
 			item.Subject = sanitizeTab(headerValue(msg.Payload, "Subject"))
 			item.Date = formatGmailDateInLocation(headerValue(msg.Payload, "Date"), loc)
 			if includeBody {

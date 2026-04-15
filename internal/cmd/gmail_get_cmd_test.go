@@ -13,6 +13,7 @@ import (
 
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
+	"google.golang.org/api/people/v1"
 
 	"github.com/steipete/gogcli/internal/outfmt"
 	"github.com/steipete/gogcli/internal/ui"
@@ -20,7 +21,11 @@ import (
 
 func TestGmailGetCmd_JSON_Full(t *testing.T) {
 	origNew := newGmailService
-	t.Cleanup(func() { newGmailService = origNew })
+	origPeople := newPeopleContactsService
+	t.Cleanup(func() {
+		newGmailService = origNew
+		newPeopleContactsService = origPeople
+	})
 
 	bodyData := base64.RawURLEncoding.EncodeToString([]byte("hello"))
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +64,9 @@ func TestGmailGetCmd_JSON_Full(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 	newGmailService = func(context.Context, string) (*gmail.Service, error) { return svc, nil }
+	peopleSvc, peopleClose := newPeopleServiceForContactsTest(t)
+	defer peopleClose()
+	newPeopleContactsService = func(context.Context, string) (*people.Service, error) { return peopleSvc, nil }
 
 	flags := &RootFlags{Account: "a@b.com"}
 	out := captureStdout(t, func() {
@@ -96,6 +104,69 @@ func TestGmailGetCmd_JSON_Full(t *testing.T) {
 	}
 	if headers["bcc"] != "d@example.com" {
 		t.Fatalf("unexpected bcc header: %v", headers["bcc"])
+	}
+	headerContacts, ok := parsed["headerContacts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected headerContacts map, got: %T", parsed["headerContacts"])
+	}
+	fromContacts, ok := headerContacts["from"].([]any)
+	if !ok || len(fromContacts) != 1 {
+		t.Fatalf("expected from contacts, got: %#v", headerContacts["from"])
+	}
+	from, ok := fromContacts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected contact map, got: %#v", fromContacts[0])
+	}
+	if from["inGoogleContacts"] != false {
+		t.Fatalf("expected inGoogleContacts=false for unmatched sender, got: %#v", from)
+	}
+}
+
+func TestGmailGetCmd_Plain_ContactSummary(t *testing.T) {
+	origNew := newGmailService
+	origPeople := newPeopleContactsService
+	t.Cleanup(func() {
+		newGmailService = origNew
+		newPeopleContactsService = origPeople
+	})
+
+	bodyData := base64.RawURLEncoding.EncodeToString([]byte("hello"))
+	svc, closeFn := newGmailServiceForTest(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/gmail/v1/users/me/messages/") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":       "m1",
+			"threadId": "t1",
+			"payload": map[string]any{
+				"mimeType": "text/plain",
+				"body":     map[string]any{"data": bodyData},
+				"headers": []map[string]any{
+					{"name": "From", "value": "Nicole Wallace <wallacenk4@gmail.com>"},
+					{"name": "To", "value": "team@example.com"},
+					{"name": "Subject", "value": "S"},
+					{"name": "Date", "value": "Fri, 26 Dec 2025 10:00:00 +0000"},
+				},
+			},
+		})
+	})
+	defer closeFn()
+	newGmailService = func(context.Context, string) (*gmail.Service, error) { return svc, nil }
+	peopleSvc, peopleClose := newPeopleServiceForContactsTest(t)
+	defer peopleClose()
+	newPeopleContactsService = func(context.Context, string) (*people.Service, error) { return peopleSvc, nil }
+
+	out := captureStdout(t, func() {
+		_ = captureStderr(t, func() {
+			if err := Execute([]string{"--account", "a@b.com", "gmail", "get", "m1"}); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+		})
+	})
+	if !strings.Contains(out, "from_contact\tNicole Wallace <wallacenk4@gmail.com> [in_google_contacts=true; membership_groups=Borrower]") {
+		t.Fatalf("expected contact summary, got: %q", out)
 	}
 }
 

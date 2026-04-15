@@ -99,6 +99,7 @@ func (c *GmailThreadGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	if outfmt.IsJSON(ctx) {
 		var downloadedFiles []attachmentDownloadSummary
+		headerContacts := map[string]messageHeaderContacts{}
 		if c.Download && thread != nil {
 			for _, msg := range thread.Messages {
 				if msg == nil || msg.Id == "" {
@@ -111,10 +112,22 @@ func (c *GmailThreadGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 				downloadedFiles = append(downloadedFiles, attachmentDownloadSummaries(downloads)...)
 			}
 		}
-		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
-			"thread":     thread,
-			"downloaded": downloadedFiles,
-		})
+		contactResolver := newGmailContactResolver(ctx, account)
+		if thread != nil {
+			for _, msg := range thread.Messages {
+				if msg == nil || msg.Id == "" {
+					continue
+				}
+				headerContacts[msg.Id] = contactResolver.LookupMessageHeaders(ctx, msg.Payload)
+			}
+		}
+		payload := map[string]any{
+			"thread":                thread,
+			"messageHeaderContacts": headerContacts,
+			"downloaded":            downloadedFiles,
+		}
+		addContactEnrichmentStatus(payload, contactResolver)
+		return outfmt.WriteJSON(ctx, os.Stdout, payload)
 	}
 	if thread == nil || len(thread.Messages) == 0 {
 		u.Err().Println("Empty thread")
@@ -124,14 +137,23 @@ func (c *GmailThreadGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 	// Show message count upfront so users know how many messages to expect
 	u.Out().Printf("Thread contains %d message(s)", len(thread.Messages))
 	u.Out().Println("")
+	contactResolver := newGmailContactResolver(ctx, account)
 
 	for i, msg := range thread.Messages {
 		if msg == nil {
 			continue
 		}
+		headerContacts := contactResolver.LookupMessageHeaders(ctx, msg.Payload)
 		u.Out().Printf("=== Message %d/%d: %s ===", i+1, len(thread.Messages), msg.Id)
-		u.Out().Printf("From: %s", headerValue(msg.Payload, "From"))
-		u.Out().Printf("To: %s", headerValue(msg.Payload, "To"))
+		for _, field := range buildHeaderContactFields(msg.Payload, headerContacts) {
+			if field.Value == "" && (field.Label == "Cc" || field.Label == "Bcc") {
+				continue
+			}
+			u.Out().Printf("%s: %s", field.Label, field.Value)
+			if field.Summary != "" {
+				u.Out().Printf("%s contact: %s", field.Label, field.Summary)
+			}
+		}
 		u.Out().Printf("Subject: %s", headerValue(msg.Payload, "Subject"))
 		u.Out().Printf("Date: %s", headerValue(msg.Payload, "Date"))
 		u.Out().Println("")
@@ -172,6 +194,7 @@ func (c *GmailThreadGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 		}
 	}
 
+	warnContactEnrichment(u, contactResolver)
 	return nil
 }
 

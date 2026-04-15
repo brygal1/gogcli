@@ -25,6 +25,14 @@ func TestExecute_ContactsMoreCommands_Text(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		switch {
+		case strings.Contains(path, "/contactGroups") && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"contactGroups": []map[string]any{
+					{"resourceName": "contactGroups/borrower", "name": "Borrower", "formattedName": "Borrower"},
+				},
+			})
+			return
 		case strings.Contains(path, "people/c1") && r.Method == http.MethodGet && !strings.Contains(path, ":"):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -34,6 +42,9 @@ func TestExecute_ContactsMoreCommands_Text(t *testing.T) {
 					{"value": "ada@example.com"},
 				},
 				"phoneNumbers": []map[string]any{{"value": "+1"}},
+				"memberships": []map[string]any{
+					{"contactGroupMembership": map[string]any{"contactGroupResourceName": "contactGroups/borrower"}},
+				},
 			})
 			return
 		case strings.Contains(path, "people:searchContacts") && r.Method == http.MethodGet:
@@ -48,6 +59,9 @@ func TestExecute_ContactsMoreCommands_Text(t *testing.T) {
 								{"value": "ada@example.com"},
 							},
 							"phoneNumbers": []map[string]any{{"value": "+1"}},
+							"memberships": []map[string]any{
+								{"contactGroupMembership": map[string]any{"contactGroupResourceName": "contactGroups/borrower"}},
+							},
 						},
 					},
 				},
@@ -62,6 +76,9 @@ func TestExecute_ContactsMoreCommands_Text(t *testing.T) {
 						"names":        []map[string]any{{"displayName": "Ada"}},
 						"emailAddresses": []map[string]any{
 							{"value": "ada@example.com"},
+						},
+						"memberships": []map[string]any{
+							{"contactGroupMembership": map[string]any{"contactGroupResourceName": "contactGroups/borrower"}},
 						},
 					},
 				},
@@ -176,5 +193,8 @@ func TestExecute_ContactsMoreCommands_Text(t *testing.T) {
 	})
 	if !strings.Contains(out, "RESOURCE") || !strings.Contains(out, "people/c1") || !strings.Contains(out, "people/d1") {
 		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "Borrower") || !strings.Contains(out, "membership_groups\tBorrower") {
+		t.Fatalf("expected membership groups in output, got: %q", out)
 	}
 }

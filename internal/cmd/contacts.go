@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -52,33 +53,18 @@ func (c *ContactsSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
 		return err
 	}
 	if outfmt.IsJSON(ctx) {
-		type item struct {
-			Resource         string   `json:"resource"`
-			Name             string   `json:"name,omitempty"`
-			Email            string   `json:"email,omitempty"`
-			Phone            string   `json:"phone,omitempty"`
-			MembershipGroups []string `json:"membershipGroups,omitempty"`
-		}
-		items := make([]item, 0, len(resp.Results))
-		groupNames := map[string]string{}
-		if c.IncludeMemberships {
-			groupNames, err = listContactGroupNames(ctx, svc, account)
-			if err != nil {
-				return err
-			}
+		items := make([]contactSummaryItem, 0, len(resp.Results))
+		var groupNames map[string]string
+		groupNames, err = loadContactGroupNames(svc, c.IncludeMemberships)
+		if err != nil {
+			return err
 		}
 		for _, r := range resp.Results {
 			p := r.Person
 			if p == nil {
 				continue
 			}
-			items = append(items, item{
-				Resource:         p.ResourceName,
-				Name:             primaryName(p),
-				Email:            primaryEmail(p),
-				Phone:            primaryPhone(p),
-				MembershipGroups: membershipGroupNames(p, groupNames),
-			})
+			items = append(items, contactSummaryForPerson(p, groupNames))
 		}
 		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{"contacts": items})
 	}
@@ -89,26 +75,82 @@ func (c *ContactsSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
 
 	w, flush := tableWriter(ctx)
 	defer flush()
-	fmt.Fprintln(w, "RESOURCE\tNAME\tEMAIL\tPHONE")
+	var groupNames map[string]string
+	groupNames, err = loadContactGroupNames(svc, c.IncludeMemberships)
+	if err != nil {
+		return err
+	}
+	writeContactSummaryHeader(w, c.IncludeMemberships)
 	for _, r := range resp.Results {
 		p := r.Person
 		if p == nil {
 			continue
 		}
-		fmt.Fprintf(
-			w,
-			"%s\t%s\t%s\t%s\n",
-			p.ResourceName,
-			sanitizeTab(primaryName(p)),
-			sanitizeTab(primaryEmail(p)),
-			sanitizeTab(primaryPhone(p)),
-		)
+		writeContactSummaryRow(w, contactSummaryForPerson(p, groupNames), c.IncludeMemberships)
 	}
 	return nil
 }
 
+type contactSummaryItem struct {
+	Resource         string   `json:"resource"`
+	Name             string   `json:"name,omitempty"`
+	Email            string   `json:"email,omitempty"`
+	Phone            string   `json:"phone,omitempty"`
+	MembershipGroups []string `json:"membershipGroups,omitempty"`
+}
 
-func listContactGroupNames(ctx context.Context, svc *people.Service, resourceName string) (map[string]string, error) {
+func loadContactGroupNames(svc *people.Service, include bool) (map[string]string, error) {
+	if !include {
+		return map[string]string{}, nil
+	}
+	return listContactGroupNames(svc)
+}
+
+func contactSummaryForPerson(p *people.Person, groupNames map[string]string) contactSummaryItem {
+	if p == nil {
+		return contactSummaryItem{}
+	}
+	return contactSummaryItem{
+		Resource:         p.ResourceName,
+		Name:             primaryName(p),
+		Email:            primaryEmail(p),
+		Phone:            primaryPhone(p),
+		MembershipGroups: membershipGroupNames(p, groupNames),
+	}
+}
+
+func writeContactSummaryHeader(w io.Writer, includeMemberships bool) {
+	if includeMemberships {
+		fmt.Fprintln(w, "RESOURCE\tNAME\tEMAIL\tPHONE\tGROUPS")
+		return
+	}
+	fmt.Fprintln(w, "RESOURCE\tNAME\tEMAIL\tPHONE")
+}
+
+func writeContactSummaryRow(w io.Writer, item contactSummaryItem, includeMemberships bool) {
+	if includeMemberships {
+		fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\t%s\t%s\n",
+			item.Resource,
+			sanitizeTab(item.Name),
+			sanitizeTab(item.Email),
+			sanitizeTab(item.Phone),
+			sanitizeTab(strings.Join(item.MembershipGroups, ", ")),
+		)
+		return
+	}
+	fmt.Fprintf(
+		w,
+		"%s\t%s\t%s\t%s\n",
+		item.Resource,
+		sanitizeTab(item.Name),
+		sanitizeTab(item.Email),
+		sanitizeTab(item.Phone),
+	)
+}
+
+func listContactGroupNames(svc *people.Service) (map[string]string, error) {
 	out := map[string]string{}
 	pageToken := ""
 	for {
@@ -133,9 +175,6 @@ func listContactGroupNames(ctx context.Context, svc *people.Service, resourceNam
 			}
 			if rn := strings.TrimSpace(g.ResourceName); rn != "" {
 				out[rn] = name
-			}
-			if id := strings.TrimSpace(g.GroupType); id != "" {
-				_ = id
 			}
 		}
 		if strings.TrimSpace(resp.NextPageToken) == "" {

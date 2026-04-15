@@ -18,6 +18,13 @@ func TestExecute_ContactsList_Text(t *testing.T) {
 	t.Cleanup(func() { newPeopleContactsService = origNew })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/contactGroups") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"contactGroups": []map[string]any{},
+			})
+			return
+		}
 		if !strings.Contains(r.URL.Path, "/people/me/connections") {
 			http.NotFound(w, r)
 			return
@@ -68,6 +75,13 @@ func TestExecute_ContactsGet_ByResource_Text(t *testing.T) {
 	t.Cleanup(func() { newPeopleContactsService = origNew })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/contactGroups") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"contactGroups": []map[string]any{},
+			})
+			return
+		}
 		if !(strings.Contains(r.URL.Path, "/people/c1") && r.Method == http.MethodGet && !strings.Contains(r.URL.Path, ":")) {
 			http.NotFound(w, r)
 			return
@@ -111,6 +125,13 @@ func TestExecute_ContactsGet_CustomFieldsSorted_Text(t *testing.T) {
 	t.Cleanup(func() { newPeopleContactsService = origNew })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/contactGroups") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"contactGroups": []map[string]any{},
+			})
+			return
+		}
 		if !(strings.Contains(r.URL.Path, "/people/c1") && r.Method == http.MethodGet) {
 			http.NotFound(w, r)
 			return

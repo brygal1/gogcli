@@ -10,11 +10,16 @@ import (
 
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
+	"google.golang.org/api/people/v1"
 )
 
 func TestExecute_GmailSearch_Text(t *testing.T) {
 	origNew := newGmailService
-	t.Cleanup(func() { newGmailService = origNew })
+	origPeople := newPeopleContactsService
+	t.Cleanup(func() {
+		newGmailService = origNew
+		newPeopleContactsService = origPeople
+	})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
@@ -69,6 +74,9 @@ func TestExecute_GmailSearch_Text(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 	newGmailService = func(context.Context, string) (*gmail.Service, error) { return svc, nil }
+	peopleSvc, peopleClose := newPeopleServiceForContactsTest(t)
+	defer peopleClose()
+	newPeopleContactsService = func(context.Context, string) (*people.Service, error) { return peopleSvc, nil }
 
 	out := captureStdout(t, func() {
 		_ = captureStderr(t, func() {
@@ -79,6 +87,9 @@ func TestExecute_GmailSearch_Text(t *testing.T) {
 	})
 	if !strings.Contains(out, "ID") || !strings.Contains(out, "Hello") {
 		t.Fatalf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "IN_CONTACTS") || !strings.Contains(out, "no") {
+		t.Fatalf("expected contact context columns, got: %q", out)
 	}
 }
 

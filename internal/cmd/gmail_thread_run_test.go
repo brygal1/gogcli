@@ -13,11 +13,16 @@ import (
 
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
+	"google.golang.org/api/people/v1"
 )
 
 func TestGmailThreadGetAndAttachments_JSON(t *testing.T) {
 	origNew := newGmailService
-	t.Cleanup(func() { newGmailService = origNew })
+	origPeople := newPeopleContactsService
+	t.Cleanup(func() {
+		newGmailService = origNew
+		newPeopleContactsService = origPeople
+	})
 
 	attachmentData := base64.RawURLEncoding.EncodeToString([]byte("payload"))
 	threadResp := map[string]any{
@@ -109,6 +114,9 @@ func TestGmailThreadGetAndAttachments_JSON(t *testing.T) {
 		t.Fatalf("NewService: %v", err)
 	}
 	newGmailService = func(context.Context, string) (*gmail.Service, error) { return svc, nil }
+	peopleSvc, peopleClose := newPeopleServiceForContactsTest(t)
+	defer peopleClose()
+	newPeopleContactsService = func(context.Context, string) (*people.Service, error) { return peopleSvc, nil }
 
 	outDir := t.TempDir()
 	getOut := captureStdout(t, func() {
@@ -120,14 +128,18 @@ func TestGmailThreadGetAndAttachments_JSON(t *testing.T) {
 	})
 
 	var payload struct {
-		Thread     map[string]any   `json:"thread"`
-		Downloaded []map[string]any `json:"downloaded"`
+		Thread                map[string]any                   `json:"thread"`
+		MessageHeaderContacts map[string]messageHeaderContacts `json:"messageHeaderContacts"`
+		Downloaded            []map[string]any                 `json:"downloaded"`
 	}
 	if err := json.Unmarshal([]byte(getOut), &payload); err != nil {
 		t.Fatalf("decode thread json: %v", err)
 	}
 	if payload.Thread == nil || len(payload.Downloaded) != 1 {
 		t.Fatalf("unexpected thread payload: %#v", payload)
+	}
+	if len(payload.MessageHeaderContacts["m1"].From) != 1 || payload.MessageHeaderContacts["m1"].From[0].InGoogleContacts {
+		t.Fatalf("expected unmatched sender enrichment, got: %#v", payload.MessageHeaderContacts)
 	}
 	path, ok := payload.Downloaded[0]["path"].(string)
 	if !ok || path == "" {
@@ -215,6 +227,9 @@ func TestGmailThreadGetAndAttachments_JSON(t *testing.T) {
 	})
 	if !strings.Contains(plainOut, "Thread contains") {
 		t.Fatalf("unexpected plain output: %q", plainOut)
+	}
+	if !strings.Contains(plainOut, "From contact: a@example.com [in_google_contacts=false]") {
+		t.Fatalf("expected plain contact summary, got: %q", plainOut)
 	}
 
 	emptyErr := captureStderr(t, func() {

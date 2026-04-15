@@ -196,15 +196,16 @@ func isUnsubscribeLink(raw string) bool {
 }
 
 type threadItem struct {
-	ID           string   `json:"id"`
-	Date         string   `json:"date,omitempty"`
-	From         string   `json:"from,omitempty"`
-	Subject      string   `json:"subject,omitempty"`
-	Labels       []string `json:"labels,omitempty"`
-	MessageCount int      `json:"messageCount,omitempty"`
+	ID           string                 `json:"id"`
+	Date         string                 `json:"date,omitempty"`
+	From         string                 `json:"from,omitempty"`
+	FromContact  *resolvedHeaderContact `json:"fromContact,omitempty"`
+	Subject      string                 `json:"subject,omitempty"`
+	Labels       []string               `json:"labels,omitempty"`
+	MessageCount int                    `json:"messageCount,omitempty"`
 }
 
-func fetchThreadDetails(ctx context.Context, svc *gmail.Service, threads []*gmail.Thread, idToName map[string]string, oldest bool, loc *time.Location) ([]threadItem, error) {
+func fetchThreadDetails(ctx context.Context, svc *gmail.Service, threads []*gmail.Thread, idToName map[string]string, oldest bool, loc *time.Location, resolver *gmailContactResolver) ([]threadItem, error) {
 	if len(threads) == 0 {
 		return nil, nil
 	}
@@ -251,6 +252,11 @@ func fetchThreadDetails(ctx context.Context, svc *gmail.Service, threads []*gmai
 			item := threadItem{ID: threadID, MessageCount: len(fullThread.Messages)}
 			if first := firstMessage(fullThread); first != nil {
 				item.From = sanitizeTab(headerValue(first.Payload, "From"))
+				if resolver != nil {
+					if contacts := resolver.LookupHeader(ctx, headerValue(first.Payload, "From")); len(contacts) > 0 {
+						item.FromContact = &contacts[0]
+					}
+				}
 				item.Subject = sanitizeTab(headerValue(first.Payload, "Subject"))
 				if len(first.LabelIds) > 0 {
 					names := make([]string, 0, len(first.LabelIds))

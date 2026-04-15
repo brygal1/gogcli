@@ -15,7 +15,7 @@ import (
 )
 
 func TestFetchThreadDetails_Empty(t *testing.T) {
-	items, err := fetchThreadDetails(context.Background(), nil, nil, nil, false, time.UTC)
+	items, err := fetchThreadDetails(context.Background(), nil, nil, nil, false, time.UTC, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestFetchThreadDetails_Concurrent(t *testing.T) {
 		"INBOX": "Inbox",
 	}
 
-	items, err := fetchThreadDetails(context.Background(), svc, threads, idToName, false, time.UTC)
+	items, err := fetchThreadDetails(context.Background(), svc, threads, idToName, false, time.UTC, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestFetchThreadDetails_DateSelection(t *testing.T) {
 
 	threads := []*gmail.Thread{{Id: "thread1"}}
 
-	itemsNewest, err := fetchThreadDetails(context.Background(), svc, threads, nil, false, time.UTC)
+	itemsNewest, err := fetchThreadDetails(context.Background(), svc, threads, nil, false, time.UTC, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestFetchThreadDetails_DateSelection(t *testing.T) {
 		t.Errorf("expected newest date %s, got %s", expectedNewest, itemsNewest[0].Date)
 	}
 
-	itemsOldest, err := fetchThreadDetails(context.Background(), svc, threads, nil, true, time.UTC)
+	itemsOldest, err := fetchThreadDetails(context.Background(), svc, threads, nil, true, time.UTC, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestFetchThreadDetails_SkipsEmptyIDs(t *testing.T) {
 		{Id: ""},        // Should be skipped
 	}
 
-	items, err := fetchThreadDetails(context.Background(), svc, threads, nil, false, time.UTC)
+	items, err := fetchThreadDetails(context.Background(), svc, threads, nil, false, time.UTC, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestFetchThreadDetails_ContextCanceled(t *testing.T) {
 
 	threads := []*gmail.Thread{{Id: "thread1"}}
 
-	_, err := fetchThreadDetails(ctx, svc, threads, nil, false, time.UTC)
+	_, err := fetchThreadDetails(ctx, svc, threads, nil, false, time.UTC, nil)
 	// Context was canceled, we may or may not get an error depending on timing.
 	// Either nil or context.Canceled is acceptable.
 	_ = err
