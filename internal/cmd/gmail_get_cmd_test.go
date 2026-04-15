@@ -120,6 +120,18 @@ func TestGmailGetCmd_JSON_Full(t *testing.T) {
 	if from["inGoogleContacts"] != false {
 		t.Fatalf("expected inGoogleContacts=false for unmatched sender, got: %#v", from)
 	}
+	message, ok := parsed["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected message map, got: %T", parsed["message"])
+	}
+	messageHeaderContacts, ok := message["headerContacts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested headerContacts map, got: %T", message["headerContacts"])
+	}
+	nestedFromContacts, ok := messageHeaderContacts["from"].([]any)
+	if !ok || len(nestedFromContacts) != 1 {
+		t.Fatalf("expected nested from contacts, got: %#v", messageHeaderContacts["from"])
+	}
 }
 
 func TestGmailGetCmd_Plain_ContactSummary(t *testing.T) {

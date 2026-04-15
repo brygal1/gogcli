@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/mail"
@@ -256,6 +257,51 @@ func addContactEnrichmentStatus(payload map[string]any, resolver *gmailContactRe
 	if warning := resolver.Warning(); warning != "" {
 		payload["contactEnrichmentWarning"] = warning
 	}
+}
+
+func jsonObjectWithHeaderContacts(value any, headerContacts messageHeaderContacts) (map[string]any, error) {
+	payload, err := jsonObject(value)
+	if err != nil {
+		return nil, err
+	}
+	payload["headerContacts"] = headerContacts
+	return payload, nil
+}
+
+func jsonThreadWithMessageHeaderContacts(thread *gmail.Thread, headerContacts map[string]messageHeaderContacts) (map[string]any, error) {
+	payload, err := jsonObject(thread)
+	if err != nil {
+		return nil, err
+	}
+	rawMessages, ok := payload["messages"].([]any)
+	if !ok || len(rawMessages) == 0 {
+		return payload, nil
+	}
+	for i, rawMessage := range rawMessages {
+		messageMap, ok := rawMessage.(map[string]any)
+		if !ok {
+			continue
+		}
+		if i < len(thread.Messages) && thread.Messages[i] != nil && thread.Messages[i].Id != "" {
+			messageMap["headerContacts"] = headerContacts[thread.Messages[i].Id]
+		}
+	}
+	return payload, nil
+}
+
+func jsonObject(value any) (map[string]any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 func warnContactEnrichment(u *ui.UI, resolver *gmailContactResolver) {

@@ -141,6 +141,22 @@ func TestGmailThreadGetAndAttachments_JSON(t *testing.T) {
 	if len(payload.MessageHeaderContacts["m1"].From) != 1 || payload.MessageHeaderContacts["m1"].From[0].InGoogleContacts {
 		t.Fatalf("expected unmatched sender enrichment, got: %#v", payload.MessageHeaderContacts)
 	}
+	messages, ok := payload.Thread["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("expected thread messages, got: %#v", payload.Thread["messages"])
+	}
+	message, ok := messages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected thread message map, got: %#v", messages[0])
+	}
+	nestedHeaderContacts, ok := message["headerContacts"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected nested headerContacts map, got: %#v", message["headerContacts"])
+	}
+	nestedFromContacts, ok := nestedHeaderContacts["from"].([]any)
+	if !ok || len(nestedFromContacts) != 1 {
+		t.Fatalf("expected nested from contacts, got: %#v", nestedHeaderContacts["from"])
+	}
 	path, ok := payload.Downloaded[0]["path"].(string)
 	if !ok || path == "" {
 		t.Fatalf("expected download path, got: %#v", payload.Downloaded)

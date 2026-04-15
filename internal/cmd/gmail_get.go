@@ -71,6 +71,10 @@ func (c *GmailGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 	contactResolver := newGmailContactResolver(ctx, account)
 	headerContacts := contactResolver.LookupMessageHeaders(ctx, msg.Payload)
 	if outfmt.IsJSON(ctx) {
+		messagePayload, err := jsonObjectWithHeaderContacts(msg, headerContacts)
+		if err != nil {
+			return err
+		}
 		// Include a flattened headers map for easier querying
 		// (e.g., jq '.headers.to' instead of complex nested queries)
 		headers := map[string]string{
@@ -82,7 +86,7 @@ func (c *GmailGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 			"date":    headerValue(msg.Payload, "Date"),
 		}
 		payload := map[string]any{
-			"message":        msg,
+			"message":        messagePayload,
 			"headers":        headers,
 			"headerContacts": headerContacts,
 		}

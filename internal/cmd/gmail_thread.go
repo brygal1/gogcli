@@ -121,8 +121,12 @@ func (c *GmailThreadGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 				headerContacts[msg.Id] = contactResolver.LookupMessageHeaders(ctx, msg.Payload)
 			}
 		}
+		threadPayload, err := jsonThreadWithMessageHeaderContacts(thread, headerContacts)
+		if err != nil {
+			return err
+		}
 		payload := map[string]any{
-			"thread":                thread,
+			"thread":                threadPayload,
 			"messageHeaderContacts": headerContacts,
 			"downloaded":            downloadedFiles,
 		}
