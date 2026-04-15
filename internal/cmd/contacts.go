@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"google.golang.org/api/people/v1"
@@ -24,8 +25,9 @@ type ContactsCmd struct {
 }
 
 type ContactsSearchCmd struct {
-	Query []string `arg:"" name:"query" help:"Search query"`
-	Max   int64    `name:"max" aliases:"limit" help:"Max results" default:"50"`
+	Query              []string `arg:"" name:"query" help:"Search query"`
+	Max                int64    `name:"max" aliases:"limit" help:"Max results" default:"50"`
+	IncludeMemberships bool     `name:"include-memberships" help:"Include human-readable contact group memberships in JSON output" default:"true"`
 }
 
 func (c *ContactsSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
@@ -51,22 +53,31 @@ func (c *ContactsSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
 	}
 	if outfmt.IsJSON(ctx) {
 		type item struct {
-			Resource string `json:"resource"`
-			Name     string `json:"name,omitempty"`
-			Email    string `json:"email,omitempty"`
-			Phone    string `json:"phone,omitempty"`
+			Resource         string   `json:"resource"`
+			Name             string   `json:"name,omitempty"`
+			Email            string   `json:"email,omitempty"`
+			Phone            string   `json:"phone,omitempty"`
+			MembershipGroups []string `json:"membershipGroups,omitempty"`
 		}
 		items := make([]item, 0, len(resp.Results))
+		groupNames := map[string]string{}
+		if c.IncludeMemberships {
+			groupNames, err = listContactGroupNames(ctx, svc, account)
+			if err != nil {
+				return err
+			}
+		}
 		for _, r := range resp.Results {
 			p := r.Person
 			if p == nil {
 				continue
 			}
 			items = append(items, item{
-				Resource: p.ResourceName,
-				Name:     primaryName(p),
-				Email:    primaryEmail(p),
-				Phone:    primaryPhone(p),
+				Resource:         p.ResourceName,
+				Name:             primaryName(p),
+				Email:            primaryEmail(p),
+				Phone:            primaryPhone(p),
+				MembershipGroups: membershipGroupNames(p, groupNames),
 			})
 		}
 		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{"contacts": items})
@@ -94,6 +105,73 @@ func (c *ContactsSearchCmd) Run(ctx context.Context, flags *RootFlags) error {
 		)
 	}
 	return nil
+}
+
+
+func listContactGroupNames(ctx context.Context, svc *people.Service, resourceName string) (map[string]string, error) {
+	out := map[string]string{}
+	pageToken := ""
+	for {
+		call := svc.ContactGroups.List().PageSize(1000)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
+		if err != nil {
+			return nil, err
+		}
+		for _, g := range resp.ContactGroups {
+			if g == nil {
+				continue
+			}
+			name := strings.TrimSpace(g.Name)
+			if name == "" {
+				name = strings.TrimSpace(g.FormattedName)
+			}
+			if name == "" {
+				name = strings.TrimSpace(g.ResourceName)
+			}
+			if rn := strings.TrimSpace(g.ResourceName); rn != "" {
+				out[rn] = name
+			}
+			if id := strings.TrimSpace(g.GroupType); id != "" {
+				_ = id
+			}
+		}
+		if strings.TrimSpace(resp.NextPageToken) == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
+	}
+	return out, nil
+}
+
+func membershipGroupNames(p *people.Person, groupNames map[string]string) []string {
+	if p == nil || len(p.Memberships) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(p.Memberships))
+	for _, m := range p.Memberships {
+		if m == nil || m.ContactGroupMembership == nil {
+			continue
+		}
+		rn := strings.TrimSpace(m.ContactGroupMembership.ContactGroupResourceName)
+		if rn == "" {
+			continue
+		}
+		name := strings.TrimSpace(groupNames[rn])
+		if name == "" {
+			name = rn
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func primaryName(p *people.Person) string {

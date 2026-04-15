@@ -17,6 +17,15 @@ func TestExecute_ContactsList_JSON(t *testing.T) {
 	t.Cleanup(func() { newPeopleContactsService = origNew })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/contactGroups") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"contactGroups": []map[string]any{
+					{"resourceName": "contactGroups/myContacts", "name": "My Contacts", "formattedName": "My Contacts"},
+				},
+			})
+			return
+		}
 		if !strings.Contains(r.URL.Path, "/people/me/connections") {
 			http.NotFound(w, r)
 			return
@@ -29,6 +38,9 @@ func TestExecute_ContactsList_JSON(t *testing.T) {
 					"names":        []map[string]any{{"displayName": "Ada Lovelace"}},
 					"emailAddresses": []map[string]any{
 						{"value": "ada@example.com"},
+					},
+					"memberships": []map[string]any{
+						{"contactGroupMembership": map[string]any{"contactGroupResourceName": "contactGroups/myContacts"}},
 					},
 				},
 			},
@@ -57,9 +69,10 @@ func TestExecute_ContactsList_JSON(t *testing.T) {
 
 	var parsed struct {
 		Contacts []struct {
-			Resource string `json:"resource"`
-			Name     string `json:"name"`
-			Email    string `json:"email"`
+			Resource         string   `json:"resource"`
+			Name             string   `json:"name"`
+			Email            string   `json:"email"`
+			MembershipGroups []string `json:"membershipGroups"`
 		} `json:"contacts"`
 		NextPageToken string `json:"nextPageToken"`
 	}
@@ -72,6 +85,9 @@ func TestExecute_ContactsList_JSON(t *testing.T) {
 	if parsed.Contacts[0].Resource != "people/c1" || parsed.Contacts[0].Name != "Ada Lovelace" || parsed.Contacts[0].Email != "ada@example.com" {
 		t.Fatalf("unexpected contact: %#v", parsed.Contacts[0])
 	}
+	if len(parsed.Contacts[0].MembershipGroups) != 1 || parsed.Contacts[0].MembershipGroups[0] != "My Contacts" {
+		t.Fatalf("unexpected memberships: %#v", parsed.Contacts[0].MembershipGroups)
+	}
 }
 
 func TestExecute_ContactsGet_ByEmail_JSON(t *testing.T) {
@@ -79,6 +95,15 @@ func TestExecute_ContactsGet_ByEmail_JSON(t *testing.T) {
 	t.Cleanup(func() { newPeopleContactsService = origNew })
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/contactGroups") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"contactGroups": []map[string]any{
+					{"resourceName": "contactGroups/realtor", "name": "realtor", "formattedName": "realtor"},
+				},
+			})
+			return
+		}
 		if !strings.Contains(r.URL.Path, "people:searchContacts") {
 			http.NotFound(w, r)
 			return
@@ -92,6 +117,9 @@ func TestExecute_ContactsGet_ByEmail_JSON(t *testing.T) {
 						"names":        []map[string]any{{"displayName": "Ada Lovelace"}},
 						"emailAddresses": []map[string]any{
 							{"value": "ada@example.com"},
+						},
+						"memberships": []map[string]any{
+							{"contactGroupMembership": map[string]any{"contactGroupResourceName": "contactGroups/realtor"}},
 						},
 					},
 				},
@@ -122,11 +150,15 @@ func TestExecute_ContactsGet_ByEmail_JSON(t *testing.T) {
 		Contact struct {
 			ResourceName string `json:"resourceName"`
 		} `json:"contact"`
+		MembershipGroups []string `json:"membershipGroups"`
 	}
 	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
 		t.Fatalf("json parse: %v\nout=%q", err, out)
 	}
 	if parsed.Contact.ResourceName != "people/c1" {
 		t.Fatalf("unexpected contact: %#v", parsed.Contact)
+	}
+	if len(parsed.MembershipGroups) != 1 || parsed.MembershipGroups[0] != "realtor" {
+		t.Fatalf("unexpected memberships: %#v", parsed.MembershipGroups)
 	}
 }

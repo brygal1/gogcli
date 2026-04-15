@@ -33,6 +33,14 @@ func TestExecute_ContactsMoreCommands_JSON(t *testing.T) {
 				"names":        []map[string]any{{"givenName": "Ada", "familyName": "Lovelace"}},
 			})
 			return
+		case strings.Contains(path, "/contactGroups") && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"contactGroups": []map[string]any{
+					{"resourceName": "contactGroups/borrower", "name": "borrower", "formattedName": "borrower"},
+				},
+			})
+			return
 		case strings.Contains(path, "people:searchContacts") && r.Method == http.MethodGet:
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -45,6 +53,9 @@ func TestExecute_ContactsMoreCommands_JSON(t *testing.T) {
 								{"value": "ada@example.com"},
 							},
 							"phoneNumbers": []map[string]any{{"value": "+1"}},
+							"memberships": []map[string]any{
+								{"contactGroupMembership": map[string]any{"contactGroupResourceName": "contactGroups/borrower"}},
+							},
 						},
 					},
 				},

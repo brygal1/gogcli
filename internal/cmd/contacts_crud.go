@@ -16,14 +16,15 @@ import (
 )
 
 const (
-	contactsReadMask       = "names,emailAddresses,phoneNumbers,organizations,urls"
+	contactsReadMask       = "names,emailAddresses,phoneNumbers,organizations,urls,memberships"
 	contactsGetReadMask    = contactsReadMask + ",birthdays,biographies,addresses,genders,userDefined,relations,metadata"
 	contactsUpdateReadMask = contactsReadMask + ",birthdays,biographies,addresses,genders,userDefined,relations,metadata"
 )
 
 type ContactsListCmd struct {
-	Max  int64  `name:"max" aliases:"limit" help:"Max results" default:"100"`
-	Page string `name:"page" help:"Page token"`
+	Max                int64  `name:"max" aliases:"limit" help:"Max results" default:"100"`
+	Page               string `name:"page" help:"Page token"`
+	IncludeMemberships bool   `name:"include-memberships" help:"Include human-readable contact group memberships in JSON output" default:"true"`
 }
 
 func (c *ContactsListCmd) Run(ctx context.Context, flags *RootFlags) error {
@@ -48,21 +49,30 @@ func (c *ContactsListCmd) Run(ctx context.Context, flags *RootFlags) error {
 	}
 	if outfmt.IsJSON(ctx) {
 		type item struct {
-			Resource string `json:"resource"`
-			Name     string `json:"name,omitempty"`
-			Email    string `json:"email,omitempty"`
-			Phone    string `json:"phone,omitempty"`
+			Resource         string   `json:"resource"`
+			Name             string   `json:"name,omitempty"`
+			Email            string   `json:"email,omitempty"`
+			Phone            string   `json:"phone,omitempty"`
+			MembershipGroups []string `json:"membershipGroups,omitempty"`
 		}
 		items := make([]item, 0, len(resp.Connections))
+		groupNames := map[string]string{}
+		if c.IncludeMemberships {
+			groupNames, err = listContactGroupNames(ctx, svc, account)
+			if err != nil {
+				return err
+			}
+		}
 		for _, p := range resp.Connections {
 			if p == nil {
 				continue
 			}
 			items = append(items, item{
-				Resource: p.ResourceName,
-				Name:     primaryName(p),
-				Email:    primaryEmail(p),
-				Phone:    primaryPhone(p),
+				Resource:         p.ResourceName,
+				Name:             primaryName(p),
+				Email:            primaryEmail(p),
+				Phone:            primaryPhone(p),
+				MembershipGroups: membershipGroupNames(p, groupNames),
 			})
 		}
 		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
@@ -151,7 +161,14 @@ func (c *ContactsGetCmd) Run(ctx context.Context, flags *RootFlags) error {
 	}
 
 	if outfmt.IsJSON(ctx) {
-		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{"contact": p})
+		groupNames, err := listContactGroupNames(ctx, svc, account)
+		if err != nil {
+			return err
+		}
+		return outfmt.WriteJSON(ctx, os.Stdout, map[string]any{
+			"contact": p,
+			"membershipGroups": membershipGroupNames(p, groupNames),
+		})
 	}
 
 	u.Out().Printf("resource\t%s", p.ResourceName)
