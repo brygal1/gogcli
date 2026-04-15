@@ -20,6 +20,8 @@
 - Formatting: `make fmt` (`goimports` local prefix `github.com/steipete/gogcli` + `gofumpt`).
 - Output: keep stdout parseable (`--json` / `--plain`); send human hints/progress to stderr.
 - Gmail labels: treat label IDs as case-sensitive opaque tokens; only case-fold label names for name lookup.
+- Contact enrichment contract: contact lookup output and Gmail contact-aware output must preserve whether an address is in Google Contacts and include human-readable membership groups (for example `Borrower`, `Realtor`) in both plain-text and JSON surfaces when available.
+- Contact enrichment failures should be explicit: do not silently drop Google Contacts context when People/contact-group enrichment is unavailable; surface a warning or status instead.
 
 ## Testing Guidelines
 
